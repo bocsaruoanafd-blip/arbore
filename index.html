@@ -1,0 +1,764 @@
+<!doctype html>
+<html lang="ro">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Arborele familiei</title>
+<meta name="description" content="Arborele genealogic al familiei, cu fișe pentru fiecare persoană și export GEDCOM.">
+<meta name="theme-color" content="#2f6a4c">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Arbore">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Figtree:wght@400;500;600;700&display=swap">
+<style>
+/* Layout: one-screen app — header bar, pannable tree canvas, person panel (side on desktop, bottom sheet on phone) */
+:root{
+  --bg:#eef2ee; --surface:#ffffff; --surface-2:#f6f8f5; --line:#d5ddd5; --ink:#1d2621; --muted:#5f6d64;
+  --accent:#2f6a4c; --accent-ink:#ffffff; --accent-soft:#e1ede5;
+  --m:#3d6a96; --m-soft:#e3ecf5; --f:#a34d72; --f-soft:#f6e6ee; --u:#77807a; --u-soft:#ebeeeb;
+  --danger:#b3412f; --edge:#9aa79e;
+  --shadow:0 1px 2px rgba(20,40,28,.08),0 4px 14px rgba(20,40,28,.07);
+  --display:"Instrument Serif",Georgia,"Times New Roman",serif;
+  --body:"Figtree",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#111613; --surface:#1a211d; --surface-2:#151b17; --line:#2c3630; --ink:#e4ebe6; --muted:#9aa89f;
+  --accent:#6fbf93; --accent-ink:#0d1a12; --accent-soft:#1f3328;
+  --m:#86afd8; --m-soft:#1e2b38; --f:#e08bb0; --f-soft:#36202b; --u:#a2aba5; --u-soft:#262c28;
+  --danger:#ef8a76; --edge:#55635a; --shadow:0 1px 2px rgba(0,0,0,.4),0 4px 14px rgba(0,0,0,.3); color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#111613; --surface:#1a211d; --surface-2:#151b17; --line:#2c3630; --ink:#e4ebe6; --muted:#9aa89f;
+  --accent:#6fbf93; --accent-ink:#0d1a12; --accent-soft:#1f3328;
+  --m:#86afd8; --m-soft:#1e2b38; --f:#e08bb0; --f-soft:#36202b; --u:#a2aba5; --u-soft:#262c28;
+  --danger:#ef8a76; --edge:#55635a; --shadow:0 1px 2px rgba(0,0,0,.4),0 4px 14px rgba(0,0,0,.3); color-scheme:dark}
+[hidden]{display:none!important}
+:root{color-scheme:light;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);height:100%}
+@media (prefers-color-scheme: dark){:root{color-scheme:dark}}
+body{margin:0}
+img{max-width:100%}
+html,body{height:100%}
+body{background:var(--bg);color:var(--ink);font-family:var(--body);font-size:15px;line-height:1.45;overflow:hidden}
+*{box-sizing:border-box}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.app{height:100%;display:flex;flex-direction:column}
+header.bar{display:flex;align-items:center;gap:12px;padding-block:10px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));background:var(--surface);border-bottom:1px solid var(--line);flex-wrap:wrap}
+.brand{font-family:var(--display);font-size:26px;line-height:1;letter-spacing:.2px;margin-right:auto;display:flex;align-items:baseline;gap:10px}
+.brand small{font-family:var(--body);font-size:12px;color:var(--muted);letter-spacing:.06em;text-transform:uppercase}
+.btn{border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:7px 14px;font-weight:600;font-size:14px;display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.btn:hover{background:var(--surface-2)}
+.btn.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.btn.primary:hover{filter:brightness(1.06)}
+.btn.ghost{border-color:transparent;background:transparent}
+.btn.danger{color:var(--danger);border-color:color-mix(in srgb,var(--danger) 40%,var(--line))}
+.btn.danger.armed{background:var(--danger);color:var(--surface);border-color:var(--danger)}
+.btn.sm{padding:5px 11px;font-size:13px}
+main{flex:1;min-height:0;display:grid;grid-template-columns:1fr auto;position:relative}
+#viewport{overflow:auto;position:relative;min-width:0;touch-action:pan-x pan-y;background:
+  radial-gradient(circle at 1px 1px,color-mix(in srgb,var(--edge) 35%,transparent) 1px,transparent 0) 0 0/22px 22px}
+#stageWrap{position:relative}
+#stage{position:absolute;left:0;top:0;transform-origin:0 0}
+#lines{position:absolute;left:0;top:0;overflow:visible;pointer-events:none}
+#lines path{fill:none;stroke:var(--edge);stroke-width:1.6}
+#lines path.dash{stroke-dasharray:4 4}
+#lines path.couple{stroke-width:2.2}
+.card{position:absolute;width:156px;height:68px;border-radius:12px;background:var(--surface);border:1px solid var(--line);box-shadow:var(--shadow);display:flex;align-items:center;gap:9px;padding:0 10px 0 8px;text-align:left;transition:transform .15s ease,box-shadow .15s ease}
+.card:hover{transform:translateY(-2px)}
+.card .av{flex:none;width:42px;height:42px;border-radius:50%;display:grid;place-items:center;font-weight:700;font-size:15px;overflow:hidden;background:var(--u-soft);color:var(--u)}
+.card .av img{width:100%;height:100%;object-fit:cover}
+.card.M{border-top:3px solid var(--m)} .card.M .av{background:var(--m-soft);color:var(--m)}
+.card.F{border-top:3px solid var(--f)} .card.F .av{background:var(--f-soft);color:var(--f)}
+.card.U{border-top:3px solid var(--u)}
+.card .tx{min-width:0;display:flex;flex-direction:column}
+.card .nm{font-weight:600;font-size:13.5px;line-height:1.2;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.card .yr{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+.card.focus{box-shadow:0 0 0 3px var(--accent),var(--shadow)}
+.card.me .nm::after{content:" · eu";color:var(--accent);font-weight:700}
+.card.add{border:1.5px dashed var(--edge);background:transparent;box-shadow:none;color:var(--muted);justify-content:center;font-weight:600;font-size:13px}
+.card.add:hover{border-color:var(--accent);color:var(--accent);background:var(--accent-soft)}
+.zoom{position:absolute;right:calc(14px + env(safe-area-inset-right,0px));bottom:calc(14px + env(safe-area-inset-bottom,0px));display:flex;flex-direction:column;gap:6px;z-index:3}
+.zoom button{width:40px;height:40px;border-radius:12px;border:1px solid var(--line);background:var(--surface);box-shadow:var(--shadow);font-size:18px;font-weight:600;display:grid;place-items:center}
+@media (min-width:761px){main:has(#panel:not([hidden])) .zoom{right:calc(394px + env(safe-area-inset-right,0px))}}
+.legend{position:absolute;left:calc(14px + env(safe-area-inset-left,0px));bottom:calc(14px + env(safe-area-inset-bottom,0px));display:flex;gap:12px;font-size:12px;color:var(--muted);background:color-mix(in srgb,var(--surface) 88%,transparent);padding:6px 10px;border-radius:999px;border:1px solid var(--line);z-index:3}
+.legend i{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px;vertical-align:0}
+/* panel */
+#panel{width:380px;background:var(--surface);border-left:1px solid var(--line);overflow:auto;display:flex;flex-direction:column}
+#panel[hidden]{display:none!important}
+.p-head{display:flex;align-items:center;gap:8px;padding:12px 16px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--surface);z-index:2}
+.p-head h2{font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0;margin-right:auto;font-weight:600}
+.grab{display:none}
+.p-body{padding:18px 18px 28px;display:flex;flex-direction:column;gap:18px}
+.hero{display:flex;gap:14px;align-items:center}
+.hero .av{width:72px;height:72px;border-radius:50%;flex:none;display:grid;place-items:center;font-size:24px;font-weight:700;overflow:hidden;background:var(--u-soft);color:var(--u)}
+.hero .av img{width:100%;height:100%;object-fit:cover}
+.hero.M .av{background:var(--m-soft);color:var(--m)} .hero.F .av{background:var(--f-soft);color:var(--f)}
+.hero h3{font-family:var(--display);font-weight:400;font-size:30px;line-height:1.05;margin:0;text-wrap:balance}
+.hero .sub{color:var(--muted);font-size:13px;margin-top:3px}
+.pill{display:inline-block;font-size:11.5px;font-weight:600;padding:2px 8px;border-radius:999px;background:var(--accent-soft);color:var(--accent);letter-spacing:.02em}
+.pill.dec{background:var(--u-soft);color:var(--u)}
+dl.facts{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;margin:0;font-size:14px}
+dl.facts dt{color:var(--muted)}
+dl.facts dd{margin:0;min-width:0;overflow-wrap:anywhere}
+.sec h4{margin:0 0 8px;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:600}
+.about{white-space:pre-wrap;font-size:14.5px;background:var(--surface-2);border-radius:10px;padding:10px 12px;border:1px solid var(--line)}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{border:1px solid var(--line);background:var(--surface-2);border-radius:999px;padding:4px 10px 4px 4px;font-size:13px;display:inline-flex;align-items:center;gap:6px}
+.chip .dot{width:20px;height:20px;border-radius:50%;display:grid;place-items:center;font-size:10px;font-weight:700;background:var(--u-soft);color:var(--u)}
+.chip.M .dot{background:var(--m-soft);color:var(--m)} .chip.F .dot{background:var(--f-soft);color:var(--f)}
+.chip:hover{border-color:var(--accent)}
+.rel-label{font-size:12px;color:var(--muted)}
+.actions{display:flex;flex-wrap:wrap;gap:8px}
+.addgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(100px,1fr));gap:6px}
+.addgrid .btn{justify-content:center}
+.muted{color:var(--muted)}
+/* form */
+form.pf{display:flex;flex-direction:column;gap:14px}
+.fld{display:flex;flex-direction:column;gap:5px}
+.fld label{font-size:13px;font-weight:600;display:flex;justify-content:space-between;gap:8px}
+.fld label span{font-weight:400;color:var(--muted);font-size:11.5px}
+.fld input,.fld select,.fld textarea{border:1px solid var(--line);background:var(--surface-2);border-radius:10px;padding:9px 11px;width:100%;min-width:0;font-size:15px}
+.fld textarea{min-height:90px;resize:vertical}
+.fld input:focus,.fld select:focus,.fld textarea:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.seg{display:flex;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--surface-2)}
+.seg label{flex:1;text-align:center;padding:8px 4px;font-size:13.5px;font-weight:600;cursor:pointer;border-right:1px solid var(--line);color:var(--muted)}
+.seg label:last-child{border-right:0}
+.seg input{position:absolute;opacity:0;pointer-events:none}
+.seg input:checked+span{color:var(--ink)}
+.seg label:has(input:checked){background:var(--surface);color:var(--ink);box-shadow:inset 0 -2px 0 var(--accent)}
+.seg label:has(input:focus-visible){outline:2px solid var(--accent);outline-offset:-2px}
+.hint{font-size:12px;color:var(--muted)}
+fieldset{border:1px dashed var(--line);border-radius:12px;padding:12px;margin:0;display:flex;flex-direction:column;gap:12px}
+legend{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);padding:0 6px;font-weight:600}
+.formbar{display:flex;gap:8px;justify-content:flex-end;position:sticky;bottom:0;background:var(--surface);padding-top:10px;border-top:1px solid var(--line)}
+.err{color:var(--danger);font-size:13px}
+/* list sheet */
+#listSheet{position:absolute;inset:0;background:color-mix(in srgb,var(--bg) 70%,transparent);backdrop-filter:blur(3px);z-index:5;display:flex;justify-content:center;padding:24px max(16px,env(safe-area-inset-right,0px)) 24px max(16px,env(safe-area-inset-left,0px))}
+.listbox{width:min(560px,100%);background:var(--surface);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);display:flex;flex-direction:column;min-height:0;max-height:100%}
+.listbox .top{display:flex;gap:8px;padding:12px;border-bottom:1px solid var(--line)}
+.listbox input{flex:1;min-width:0;border:1px solid var(--line);background:var(--surface-2);border-radius:10px;padding:9px 12px}
+.plist{overflow:auto;padding:6px}
+.pitem{display:flex;align-items:center;gap:10px;width:100%;border:0;background:transparent;padding:8px 10px;border-radius:10px;text-align:left}
+.pitem:hover{background:var(--surface-2)}
+.pitem .dot{width:32px;height:32px;border-radius:50%;display:grid;place-items:center;font-size:12px;font-weight:700;background:var(--u-soft);color:var(--u);flex:none;overflow:hidden}
+.pitem .dot img{width:100%;height:100%;object-fit:cover}
+.pitem.M .dot{background:var(--m-soft);color:var(--m)} .pitem.F .dot{background:var(--f-soft);color:var(--f)}
+.pitem .t{min-width:0}
+.pitem .t b{display:block;font-weight:600}
+.pitem .t small{color:var(--muted)}
+.stats{padding:10px 14px;border-top:1px solid var(--line);font-size:13px;color:var(--muted);display:flex;gap:14px;flex-wrap:wrap;font-variant-numeric:tabular-nums}
+/* export menu */
+.menu{position:absolute;right:max(16px,env(safe-area-inset-right,0px));top:56px;z-index:6;background:var(--surface);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);padding:6px;width:300px;max-width:calc(100% - 32px)}
+.menu button{display:block;width:100%;text-align:left;border:0;background:transparent;padding:10px 12px;border-radius:10px}
+.menu button:hover{background:var(--surface-2)}
+.menu button b{display:block;font-weight:600}
+.menu button small{color:var(--muted)}
+/* empty / status */
+.center{position:absolute;inset:0;display:grid;place-items:center;padding:24px}
+.empty{max-width:420px;text-align:center;display:flex;flex-direction:column;gap:12px;align-items:center}
+.empty h2{font-family:var(--display);font-weight:400;font-size:36px;margin:0;line-height:1.05}
+.empty p{margin:0;color:var(--muted)}
+#toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:9px 16px;border-radius:999px;font-size:14px;font-weight:500;z-index:20;box-shadow:var(--shadow);max-width:calc(100% - 32px)}
+.note{font-size:12.5px;color:var(--muted);background:var(--surface-2);border:1px solid var(--line);border-radius:10px;padding:8px 10px}
+@media (max-width:760px){
+  main{grid-template-columns:1fr}
+  #panel{position:fixed;left:0;right:0;bottom:0;width:auto;max-height:58%;border-left:0;border-top:1px solid var(--line);border-radius:18px 18px 0 0;box-shadow:0 -8px 30px rgba(0,0,0,.18);z-index:8;padding-bottom:env(safe-area-inset-bottom,0px);padding-left:env(safe-area-inset-left,0px);padding-right:env(safe-area-inset-right,0px)}
+  .grab{display:block;position:absolute;left:50%;top:5px;width:40px;height:4px;border-radius:4px;background:var(--line);transform:translateX(-50%)}
+  .brand small{display:none}
+  .brand{font-size:23px}
+  .hide-sm{display:none}
+  .legend{display:none}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;scroll-behavior:auto!important}}
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="bar">
+    <div class="brand">Arborele familiei <small id="countLbl"></small></div>
+    <button class="btn" id="btnList" type="button" aria-label="Toate persoanele">☰ <span class="hide-sm">Persoane</span></button>
+    <button class="btn" id="btnMe" type="button">⌂ <span class="hide-sm">Eu</span></button>
+    <button class="btn" id="btnExport" type="button">⇅ <span class="hide-sm">Fișiere</span></button>
+  </header>
+  <main>
+    <div id="viewport">
+      <div id="stageWrap"><div id="stage"><svg id="lines"></svg><div id="cards"></div></div></div>
+      <div class="center" id="status"><div class="empty"><h2>Se încarcă arborele…</h2><p>Aduc persoanele salvate.</p></div></div>
+    </div>
+    <div class="zoom" id="zoomCtl">
+      <button type="button" id="zIn" aria-label="Mărește">+</button>
+      <button type="button" id="zOut" aria-label="Micșorează">−</button>
+      <button type="button" id="zFit" aria-label="Centrează" title="Centrează">◎</button>
+    </div>
+    <div class="legend"><span><i style="background:var(--m)"></i>Bărbat</span><span><i style="background:var(--f)"></i>Femeie</span><span><i style="background:var(--u)"></i>Necunoscut</span></div>
+    <aside id="panel" hidden><span class="grab"></span><div class="p-head"><h2 id="pTitle">Persoană</h2><button class="btn ghost sm" id="pClose" type="button" aria-label="Închide">✕</button></div><div class="p-body" id="pBody"></div></aside>
+    <div id="listSheet" hidden><div class="listbox"><div class="top"><input id="q" type="search" placeholder="Caută după nume sau loc…" autocomplete="off"><button class="btn" id="listClose" type="button">Închide</button></div><div class="plist" id="plist"></div><div class="stats" id="stats"></div></div></div>
+    <div class="menu" id="exportMenu" hidden>
+      <button type="button" id="exGed"><b>GEDCOM pentru MyHeritage / Ancestry</b><small>Fișier .ged, gata de import</small></button>
+      <button type="button" id="exJson"><b>Copie de siguranță (JSON)</b><small>Toate datele, inclusiv fotografiile</small></button>
+      <button type="button" id="imBtn"><b>Importă un arbore</b><small>Fișier .ged (MyHeritage, Ancestry) sau copie .json</small></button>
+      <button type="button" id="inBtn" hidden><b>Instalează aplicația</b><small>O adaugi pe ecranul principal</small></button>
+    </div>
+  </main>
+</div>
+<div id="toast" hidden></div>
+<input type="file" id="imFile" accept=".ged,.json,.txt,text/plain,application/json" hidden>
+<div class="menu" id="confirmImp" hidden style="top:auto;bottom:24px;left:50%;right:auto;transform:translateX(-50%)"><div style="padding:10px 12px"><b>Înlocuiesc arborele de pe acest dispozitiv?</b><p class="muted" style="margin:6px 0 10px;font-size:13px" id="impInfo"></p><div class="actions"><button class="btn" type="button" id="impNo" style="display:inline-flex;width:auto">Renunță</button><button class="btn primary" type="button" id="impYes" style="display:inline-flex;width:auto">Înlocuiește</button></div></div></div>
+
+<script>
+(() => {
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const CW=156, CH=68, HG=18, VG=58, U=CW+HG;
+
+const canWrite=true; let assets=true;
+let people=new Map(), rootId=null, focusId=null, scale=1, loaded=false;
+let panelMode=null; // {type:'view',id} | {type:'form',...}
+
+// ---------- helpers ----------
+const P = id => people.get(id);
+const fullName = p => p ? [p.firstName, p.lastName].filter(Boolean).join(" ") || "Fără nume" : "";
+const initials = p => { const a=(p.firstName||"").trim()[0]||"", b=(p.lastName||"").trim()[0]||""; return (a+b).toUpperCase() || "?"; };
+const year = d => { const m=String(d||"").match(/\d{4}/); return m?m[0]:""; };
+const years = p => { const b=year(p.birthDate), d=year(p.deathDate);
+  if(p.status==="deceased") return (b||"?")+" – "+(d||"?");
+  return b ? "n. "+b : (p.status==="deceased"?"decedat":""); };
+const photo = p => p && p.photoId && String(p.photoId).startsWith("data:image/") ? `<img alt="" src="${esc(p.photoId)}">` : "";
+const g = p => (p && (p.gender==="M"||p.gender==="F")) ? p.gender : "U";
+const partnersOf = id => { const p=P(id); return p&&p.partners ? Object.keys(p.partners).filter(x=>people.has(x)) : []; };
+const childrenOf = id => [...people.entries()].filter(([,c])=>c.fatherId===id||c.motherId===id).map(([k])=>k).sort(byBirth);
+const siblingsOf = id => { const p=P(id); if(!p) return []; return [...people.entries()].filter(([k,c])=>k!==id && ((p.fatherId&&c.fatherId===p.fatherId)||(p.motherId&&c.motherId===p.motherId))).map(([k])=>k).sort(byBirth); };
+function byBirth(a,b){ return (year(P(a)?.birthDate)||"9999").localeCompare(year(P(b)?.birthDate)||"9999"); }
+const newId = () => "p" + Date.now().toString(36) + Math.random().toString(36).slice(2,7);
+function toast(msg){ const t=$("#toast"); t.textContent=msg; t.hidden=false; clearTimeout(toast._t); toast._t=setTimeout(()=>t.hidden=true,2600); }
+function blank(){ return {gender:"U",firstName:"",lastName:"",maidenName:"",birthDate:"",birthPlace:"",status:"living",deathDate:"",deathPlace:"",burialPlace:"",about:"",fatherId:null,motherId:null,partners:{},photoId:null}; }
+const relWord = (p, m, f, u) => g(p)==="M"?m:g(p)==="F"?f:u;
+
+// ---------- data ----------
+// ---------- local storage (IndexedDB) ----------
+const IDB={db:null,
+  open(){ return new Promise((res,rej)=>{ const r=indexedDB.open("arbore",1); r.onupgradeneeded=()=>r.result.createObjectStore("kv"); r.onsuccess=()=>{IDB.db=r.result;res();}; r.onerror=()=>rej(r.error); }); },
+  get(k){ return new Promise((res,rej)=>{ const t=IDB.db.transaction("kv").objectStore("kv").get(k); t.onsuccess=()=>res(t.result); t.onerror=()=>rej(t.error); }); },
+  set(k,v){ return new Promise((res,rej)=>{ const tx=IDB.db.transaction("kv","readwrite"); tx.objectStore("kv").put(v,k); tx.oncomplete=()=>res(); tx.onerror=()=>rej(tx.error); }); } };
+let saveChain=Promise.resolve();
+function persist(){ const snap={rootId, people:Object.fromEntries(people), savedAt:new Date().toISOString()};
+  saveChain=saveChain.then(()=>IDB.set("state",snap)).catch(e=>{ toast("Nu am putut salva pe dispozitiv"); throw e; }); return saveChain; }
+async function writePerson(id, data){ people.set(id, data); await persist(); }
+async function setRoot(id){ rootId=id; await persist(); render(); }
+
+function showStatus(title, text, btn){
+  const s=$("#status"); s.hidden=false;
+  s.innerHTML=`<div class="empty"><h2>${esc(title)}</h2><p>${esc(text)}</p>${btn||""}</div>`;
+}
+
+// ---------- tree layout ----------
+function layout(fid){
+  const nodes=[], links=[], couples=[];
+  const anc=[[{id:fid}]];
+  let maxGen=0;
+  for(let gen=1; gen<=3; gen++){
+    const row=[]; let any=false;
+    anc[gen-1].forEach((slot,i)=>{
+      const kid = slot && slot.id ? P(slot.id) : null;
+      [["fatherId","father"],["mother"+"Id","mother"]].forEach(([k,rel],j)=>{
+        if(kid){ any=true; row[2*i+j] = kid[k] && people.has(kid[k]) ? {id:kid[k], child:2*i+0, ci:i} : {add:rel, base:slot.id, ci:i}; }
+        else row[2*i+j]=null;
+      });
+    });
+    if(!any) break;
+    anc.push(row); maxGen=gen;
+    if(!row.some(s=>s&&s.id)) break; // only placeholders → stop going up
+  }
+  const L = Math.max(2, 2**maxGen);
+  const rowY = gen => (maxGen-gen)*(CH+VG);
+  const pos = {}; // key → {x,y}
+  for(let gen=1; gen<=maxGen; gen++){
+    anc[gen].forEach((s,i)=>{
+      if(!s) return;
+      const x=(i+.5)*(L/2**gen)*U, y=rowY(gen);
+      const key = s.id ? "a"+gen+"_"+i : "add"+gen+"_"+i;
+      nodes.push({...s, x, y, key});
+      pos[key]={x,y};
+      const childKey = gen===1 ? "focus" : (anc[gen-1][s.ci].id ? "a"+(gen-1)+"_"+s.ci : null);
+      if(childKey) links.push({from:childKey, to:key, dash:!s.id});
+    });
+  }
+  const xF = L*U/2, yF = rowY(0);
+  nodes.push({id:fid, x:xF, y:yF, key:"focus", focus:true}); pos.focus={x:xF,y:yF};
+  // siblings to the left
+  siblingsOf(fid).forEach((sid,k)=>{
+    const key="s"+k, x=xF-(k+1)*U; nodes.push({id:sid,x,y:yF,key}); pos[key]={x,y:yF};
+    const sp=P(sid), fp=P(fid);
+    if(sp.fatherId && sp.fatherId===fp.fatherId && pos.a1_0) links.push({from:key,to:"a1_0"});
+    if(sp.motherId && sp.motherId===fp.motherId && pos.a1_1) links.push({from:key,to:"a1_1"});
+  });
+  // partners to the right
+  const parts=partnersOf(fid);
+  parts.forEach((pid,k)=>{ const key="pt"+k, x=xF+(k+1)*U; nodes.push({id:pid,x,y:yF,key}); pos[key]={x,y:yF};
+    couples.push({a:"focus", b:key, dash:P(fid).partners[pid]!=="spouse", k}); });
+  if(!parts.length){ const key="addpt", x=xF+U; nodes.push({add:"partner",base:fid,x,y:yF,key}); pos[key]={x,y:yF}; couples.push({a:"focus",b:key,dash:true,k:0}); }
+  // couple line between parents
+  if(pos.a1_0 && pos.a1_1 && nodes.find(n=>n.key==="a1_0").id && nodes.find(n=>n.key==="a1_1").id){
+    const fa=P(nodes.find(n=>n.key==="a1_0").id); const mo=nodes.find(n=>n.key==="a1_1").id;
+    if(fa.partners && fa.partners[mo]) couples.push({a:"a1_0",b:"a1_1",dash:fa.partners[mo]!=="spouse",k:0,parents:true});
+  }
+  // children below
+  const kids=childrenOf(fid);
+  const yC=yF+CH+VG;
+  const centre = parts.length ? xF+U/2 : xF;
+  const items=[...kids.map(id=>({id})), {add:"child", base:fid}];
+  items.forEach((it,k)=>{
+    const x = centre + (k-(items.length-1)/2)*U, key = it.id ? "c"+k : "addc";
+    nodes.push({...it,x,y:yC,key}); pos[key]={x,y:yC};
+    if(it.id){ const c=P(it.id); const other = c.fatherId===fid ? c.motherId : c.fatherId;
+      const ptIdx = parts.indexOf(other);
+      links.push({from:key,to:"focus"}); if(ptIdx>=0) links.push({from:key,to:"pt"+ptIdx}); }
+    else links.push({from:key,to:"focus",dash:true});
+  });
+  return {nodes, links, couples, pos};
+}
+
+function render(){
+  $("#countLbl").textContent = people.size ? people.size + (people.size===1?" persoană":" persoane") : "";
+  if(!people.size){
+    $("#cards").innerHTML=""; $("#lines").innerHTML="";
+    if(loaded) showStatus("Începe arborele","Importă arborele din MyHeritage (fișier .ged) sau adaugă-te ca primă persoană și completează familia direct din arbore.",
+      `<div class="actions" style="justify-content:center"><button class="btn primary" id="startImp" type="button">⇪ Importă fișier .ged</button><button class="btn" id="startBtn" type="button">+ Adaugă-mă pe mine</button></div>`);
+    const sb=$("#startBtn"); if(sb) sb.onclick=()=>openForm({mode:"new", rel:"root"});
+    const si=$("#startImp"); if(si) si.onclick=()=>$("#imFile").click();
+    return;
+  }
+  $("#status").hidden=true;
+  if(!focusId || !people.has(focusId)) focusId = (rootId && people.has(rootId)) ? rootId : people.keys().next().value;
+  const {nodes, links, couples, pos} = layout(focusId);
+  const minX=Math.min(...nodes.map(n=>n.x))-CW/2-40, maxX=Math.max(...nodes.map(n=>n.x))+CW/2+40;
+  const minY=Math.min(...nodes.map(n=>n.y))-40, maxY=Math.max(...nodes.map(n=>n.y))+CH+40;
+  const W=maxX-minX, H=maxY-minY, ox=-minX, oy=-minY;
+  const stage=$("#stage"); stage.style.width=W+"px"; stage.style.height=H+"px";
+  const vp=$("#viewport");
+  $("#stageWrap").style.width=Math.max(W*scale, vp.clientWidth)+"px";
+  $("#stageWrap").style.height=Math.max(H*scale, vp.clientHeight)+"px";
+  const padL = Math.max(0,(vp.clientWidth - W*scale)/2), padT=Math.max(0,(vp.clientHeight-H*scale)/2);
+  stage.style.transform=`translate(${padL}px,${padT}px) scale(${scale})`;
+  // cards
+  let html="";
+  for(const n of nodes){
+    const left=n.x+ox-CW/2, top=n.y+oy;
+    if(n.add){
+      const lbl={father:"+ Tată",mother:"+ Mamă",partner:"+ Partener",child:"+ Copil"}[n.add];
+      html+=`<button type="button" class="card add" style="left:${left}px;top:${top}px" data-add="${n.add}" data-base="${esc(n.base)}"${canWrite?"":" hidden"}>${lbl}</button>`;
+    } else {
+      const p=P(n.id);
+      html+=`<button type="button" class="card ${g(p)}${n.focus?" focus":""}${n.id===rootId?" me":""}" style="left:${left}px;top:${top}px" data-id="${esc(n.id)}" aria-label="${esc(fullName(p))}">
+        <span class="av">${photo(p)||esc(initials(p))}</span><span class="tx"><span class="nm">${esc(fullName(p))}</span><span class="yr">${esc(years(p))}</span></span></button>`;
+    }
+  }
+  $("#cards").innerHTML=html;
+  // lines
+  let svg="";
+  const P2=k=>({x:pos[k].x+ox, y:pos[k].y+oy});
+  // group child links to draw elbows
+  for(const l of links){
+    const c=P2(l.from), p=P2(l.to);
+    const midY = c.y - VG/2;
+    // if parent is a couple partner below (focus->child) the parent is above child
+    svg+=`<path class="${l.dash?"dash":""}" d="M${c.x} ${c.y} V${midY} H${p.x} V${p.y+CH}"/>`;
+  }
+  for(const cp of couples){
+    const a=P2(cp.a), b=P2(cp.b); const y=a.y+CH/2 + (cp.k? (cp.k*6):0);
+    svg+=`<path class="couple ${cp.dash?"dash":""}" d="M${a.x+CW/2} ${y} H${b.x-CW/2}"/>`;
+  }
+  const lines=$("#lines"); lines.setAttribute("width",W); lines.setAttribute("height",H); lines.innerHTML=svg;
+  // panel refresh
+  if(panelMode && panelMode.type==="view"){ if(people.has(panelMode.id)) showPerson(panelMode.id, true); else closePanel(); }
+}
+
+function centerOnFocus(smooth){
+  const el=document.querySelector(".card.focus"); const vp=$("#viewport"); if(!el) return;
+  const r=el.getBoundingClientRect(), v=vp.getBoundingClientRect();
+  vp.scrollTo({left: vp.scrollLeft + (r.left+r.width/2) - (v.left+v.width/2), top: vp.scrollTop + (r.top+r.height/2) - (v.top+v.height/2), behavior: smooth?"smooth":"auto"});
+}
+
+// ---------- panel: view ----------
+function chip(id, label){
+  const p=P(id); if(!p) return "";
+  return `<button type="button" class="chip ${g(p)}" data-go="${esc(id)}"><span class="dot">${esc(initials(p))}</span>${esc(fullName(p))}${label?` <span class="rel-label">${esc(label)}</span>`:""}</button>`;
+}
+function showPerson(id, quiet){
+  const p=P(id); if(!p) return;
+  panelMode={type:"view", id};
+  $("#pTitle").textContent = id===rootId ? "Eu" : "Persoană";
+  const born = [p.birthDate, p.birthPlace].filter(Boolean).join(", ");
+  const died = [p.deathDate, p.deathPlace].filter(Boolean).join(", ");
+  const parents=[p.fatherId,p.motherId].filter(x=>x&&people.has(x));
+  const parts=partnersOf(id), kids=childrenOf(id), sibs=siblingsOf(id);
+  const relSec=(t,arr,lab)=>arr.length?`<div class="sec"><h4>${t}</h4><div class="chips">${arr.map(x=>chip(x, lab?lab(x):"")).join("")}</div></div>`:"";
+  $("#pBody").innerHTML = `
+    <div class="hero ${g(p)}"><div class="av">${photo(p)||esc(initials(p))}</div><div>
+      <h3>${esc(fullName(p))}</h3>
+      <div class="sub">${p.maidenName?`născută ${esc(p.maidenName)} · `:""}<span class="pill ${p.status==="deceased"?"dec":""}">${p.status==="deceased"?relWord(p,"Decedat","Decedată","Decedat(ă)"):relWord(p,"În viață","În viață","În viață")}</span></div>
+    </div></div>
+    <dl class="facts">
+      <dt>${relWord(p,"Născut","Născută","Născut(ă)")}</dt><dd>${esc(born)||'<span class="muted">—</span>'}</dd>
+      ${p.status==="deceased"?`<dt>Deces</dt><dd>${esc(died)||'<span class="muted">—</span>'}</dd><dt>Înmormântare</dt><dd>${esc(p.burialPlace)||'<span class="muted">—</span>'}</dd>`:""}
+    </dl>
+    ${p.about?`<div class="sec"><h4>Despre</h4><div class="about">${esc(p.about)}</div></div>`:""}
+    ${relSec("Părinți",parents)}
+    ${relSec("Soț / soție / partener",parts,x=>p.partners[x]==="spouse"?"căsătoriți":"parteneri")}
+    ${relSec("Copii",kids)}
+    ${relSec("Frați și surori",sibs)}
+    ${canWrite?`<div class="sec"><h4>Adaugă rudă</h4><div class="addgrid">
+      ${!p.fatherId?`<button class="btn sm" type="button" data-add="father" data-base="${esc(id)}">+ Tată</button>`:""}
+      ${!p.motherId?`<button class="btn sm" type="button" data-add="mother" data-base="${esc(id)}">+ Mamă</button>`:""}
+      <button class="btn sm" type="button" data-add="partner" data-base="${esc(id)}">+ Partener</button>
+      <button class="btn sm" type="button" data-add="child" data-base="${esc(id)}">+ Copil</button>
+      <button class="btn sm" type="button" data-add="sibling" data-base="${esc(id)}">+ Frate/soră</button>
+    </div></div>
+    <div class="actions"><button class="btn primary" type="button" id="bEdit">✎ Editează</button>
+      ${id!==rootId?`<button class="btn" type="button" id="bRoot">Sunt eu</button>`:""}
+      <button class="btn danger" type="button" id="bDel">Șterge</button></div>`:""}
+  `;
+  openPanel();
+  const be=$("#bEdit"); if(be) be.onclick=()=>openForm({mode:"edit", id});
+  const br=$("#bRoot"); if(br) br.onclick=async()=>{ await setRoot(id); toast("Am setat persoana ca „Eu”"); };
+  const bd=$("#bDel"); if(bd) bd.onclick=async()=>{
+    if(!bd.classList.contains("armed")){ bd.classList.add("armed"); bd.textContent="Confirmă ștergerea"; setTimeout(()=>{ if(bd.isConnected){bd.classList.remove("armed"); bd.textContent="Șterge";}},4000); return; }
+    await deletePerson(id);
+  };
+}
+
+function openPanel(){ $("#panel").hidden=false; }
+function closePanel(){ panelMode=null; $("#panel").hidden=true; }
+
+// ---------- panel: form ----------
+function openForm(opts){
+  // opts: {mode:'new', rel, base} | {mode:'edit', id}
+  const base = opts.base ? P(opts.base) : null;
+  let d = opts.mode==="edit" ? JSON.parse(JSON.stringify(P(opts.id))) : blank();
+  if(opts.mode==="new"){
+    if(opts.rel==="father"){ d.gender="M"; if(base) d.lastName = base.maidenName && g(base)==="F" ? base.maidenName : (g(base)==="M"?base.lastName:""); }
+    if(opts.rel==="mother"){ d.gender="F"; }
+    if(opts.rel==="sibling" && base){ d.lastName = g(base)==="F" && base.maidenName ? base.maidenName : base.lastName; }
+    if(opts.rel==="child" && base){ const dad = g(base)==="M" ? base : partnersOf(opts.base).map(P).find(x=>g(x)==="M"); d.lastName = dad ? dad.lastName : base.lastName; }
+    if(opts.rel==="partner" && base){ d.gender = g(base)==="M"?"F":g(base)==="F"?"M":"U"; }
+  }
+  const relTitle = {root:"Eu",father:"Tatăl lui "+fullName(base),mother:"Mama lui "+fullName(base),partner:"Partener pentru "+fullName(base),child:"Copil al lui "+fullName(base),sibling:"Frate/soră pentru "+fullName(base)};
+  panelMode={type:"form", opts};
+  $("#pTitle").textContent = opts.mode==="edit" ? "Editează" : "Persoană nouă";
+  const others=[...people.entries()].filter(([k])=>k!==opts.id).sort((a,b)=>fullName(a[1]).localeCompare(fullName(b[1]),"ro"));
+  const optList=(sel,filter)=>`<option value="">— nimeni —</option>`+others.filter(([,p])=>!filter||filter(p)).map(([k,p])=>`<option value="${esc(k)}"${k===sel?" selected":""}>${esc(fullName(p))}${year(p.birthDate)?" ("+year(p.birthDate)+")":""}</option>`).join("");
+  const seg=(name,val,items)=>`<div class="seg" role="radiogroup">${items.map(([v,l])=>`<label><input type="radio" name="${name}" value="${v}"${val===v?" checked":""}><span>${l}</span></label>`).join("")}</div>`;
+  const kidOther = opts.rel==="child" ? partnersOf(opts.base) : [];
+  $("#pBody").innerHTML = `
+    <form class="pf" id="pf" novalidate>
+      ${opts.mode==="new"&&opts.rel!=="root"?`<div class="note">${esc(relTitle[opts.rel])}</div>`:""}
+      <div class="fld"><label>Sex <span>Gender</span></label>${seg("gender",d.gender,[["M","Bărbat"],["F","Femeie"],["U","Necunoscut"]])}</div>
+      <div class="fld"><label for="f_first">Prenume <span>First &amp; Middle Name</span></label><input id="f_first" name="firstName" value="${esc(d.firstName)}" autocomplete="off"></div>
+      <div class="fld"><label for="f_last">Nume de familie <span>Last Name</span></label><input id="f_last" name="lastName" value="${esc(d.lastName)}" autocomplete="off"></div>
+      <div class="fld" id="w_maiden"><label for="f_maiden">Nume de fată <span>Maiden Name</span></label><input id="f_maiden" name="maidenName" value="${esc(d.maidenName)}" autocomplete="off"></div>
+      <div class="row2">
+        <div class="fld"><label for="f_bd">Data nașterii</label><input id="f_bd" name="birthDate" value="${esc(d.birthDate)}" placeholder="12 Mar 1950" autocomplete="off"></div>
+        <div class="fld"><label for="f_bp">Locul nașterii</label><input id="f_bp" name="birthPlace" value="${esc(d.birthPlace)}" placeholder="Bran, Brașov, România" autocomplete="off"></div>
+      </div>
+      <div class="hint">Date exacte: <b>12 Mar 1950</b> sau <b>12.03.1950</b>. Aproximativ: <b>Abt 1890</b>, înainte de: <b>Bef 1920</b>, după: <b>Aft 1945</b>, sau doar anul.</div>
+      <div class="fld"><label>Status <span>Living / Deceased</span></label>${seg("status",d.status,[["living","În viață"],["deceased","Decedat(ă)"]])}</div>
+      <fieldset id="w_death"><legend>Deces</legend>
+        <div class="row2">
+          <div class="fld"><label for="f_dd">Data decesului</label><input id="f_dd" name="deathDate" value="${esc(d.deathDate)}" placeholder="Abt 1985" autocomplete="off"></div>
+          <div class="fld"><label for="f_dp">Locul decesului</label><input id="f_dp" name="deathPlace" value="${esc(d.deathPlace)}" autocomplete="off"></div>
+        </div>
+        <div class="fld"><label for="f_bur">Locul înmormântării <span>Burial Place</span></label><input id="f_bur" name="burialPlace" value="${esc(d.burialPlace)}" placeholder="Cimitirul …, Bran" autocomplete="off"></div>
+      </fieldset>
+      <div class="fld"><label for="f_about">Despre <span>About</span></label><textarea id="f_about" name="about" placeholder="Ocupație, unde a trăit, amintiri, cine a povestit…">${esc(d.about)}</textarea></div>
+      ${opts.rel==="partner"?`<div class="fld"><label>Relația</label>${seg("ptype","spouse",[["spouse","Căsătoriți"],["partner","Parteneri"]])}</div>`:""}
+      ${opts.rel==="child"&&kidOther.length?`<div class="fld"><label for="f_other">Celălalt părinte</label><select id="f_other" name="otherParent"><option value="">— necunoscut —</option>${kidOther.map((k,i)=>`<option value="${esc(k)}"${i===0?" selected":""}>${esc(fullName(P(k)))}</option>`).join("")}</select></div>`:""}
+      ${opts.mode==="edit"?`<fieldset><legend>Părinți</legend>
+        <div class="fld"><label for="f_fa">Tată</label><select id="f_fa" name="fatherId">${optList(d.fatherId,p=>g(p)!=="F")}</select></div>
+        <div class="fld"><label for="f_mo">Mamă</label><select id="f_mo" name="motherId">${optList(d.motherId,p=>g(p)!=="M")}</select></div>
+      </fieldset>`:""}
+      ${assets?`<div class="fld"><label for="f_photo">Fotografie</label><input id="f_photo" type="file" accept="image/*">${d.photoId?`<label class="hint" style="font-weight:400;justify-content:flex-start;gap:6px"><input type="checkbox" id="f_rmphoto"> Șterge fotografia actuală</label>`:""}</div>`:""}
+      <div class="err" id="ferr" hidden></div>
+      <div class="formbar"><button class="btn" type="button" id="fCancel">Renunță</button><button class="btn primary" type="submit" id="fSave">Salvează</button></div>
+    </form>`;
+  openPanel();
+  const form=$("#pf");
+  const sync=()=>{ const gv=form.gender.value, st=form.status.value; $("#w_maiden").hidden = gv!=="F"; $("#w_death").hidden = st!=="deceased"; };
+  form.addEventListener("change",sync); sync();
+  $("#fCancel").onclick=()=>{ if(opts.mode==="edit") showPerson(opts.id); else if(opts.base) showPerson(opts.base); else closePanel(); };
+  setTimeout(()=>{ const f=$("#f_first"); if(f && window.innerWidth>760) f.focus(); },50);
+  form.onsubmit=async e=>{
+    e.preventDefault();
+    const fd=new FormData(form);
+    const v=k=>String(fd.get(k)??"").trim();
+    d.gender=v("gender")||"U"; d.firstName=v("firstName"); d.lastName=v("lastName");
+    d.maidenName = d.gender==="F" ? v("maidenName") : "";
+    d.birthDate=v("birthDate"); d.birthPlace=v("birthPlace"); d.status=v("status")||"living";
+    if(d.status==="deceased"){ d.deathDate=v("deathDate"); d.deathPlace=v("deathPlace"); d.burialPlace=v("burialPlace"); } else { d.deathDate=d.deathPlace=d.burialPlace=""; }
+    d.about=v("about");
+    if(!d.firstName && !d.lastName){ const er=$("#ferr"); er.textContent="Scrie cel puțin prenumele sau numele de familie."; er.hidden=false; return; }
+    const btn=$("#fSave"); btn.disabled=true; btn.textContent="Se salvează…";
+    try{
+      const file=$("#f_photo")?.files?.[0];
+      if($("#f_rmphoto")?.checked) d.photoId=null;
+      if(file){ d.photoId=await shrink(file); }
+      if(opts.mode==="edit"){
+        d.fatherId=v("fatherId")||null; d.motherId=v("motherId")||null;
+        await writePerson(opts.id,d); toast("Salvat"); showPerson(opts.id); render();
+      } else {
+        const id=newId(); await addRelative(id,d,opts,v("ptype")||"spouse",v("otherParent"));
+        focusId = opts.rel==="root" ? id : opts.base;
+        toast(fullName(d)+" a fost adăugat(ă)"); render(); showPerson(id); requestAnimationFrame(()=>centerOnFocus(true));
+      }
+    }catch(err){ const er=$("#ferr"); er.textContent = err && err.code==="quota_exceeded" ? "Spațiul de stocare e plin." : "Nu am putut salva ("+(err&&err.code||"eroare")+"). Încearcă din nou."; er.hidden=false; btn.disabled=false; btn.textContent="Salvează"; }
+  };
+}
+
+async function addRelative(id, d, opts, ptype, otherParent){
+  const bid=opts.base, base=bid?JSON.parse(JSON.stringify(P(bid))):null;
+  if(opts.rel==="root"){ await writePerson(id,d); await setRoot(id); return; }
+  if(opts.rel==="father"||opts.rel==="mother"){
+    const key = opts.rel==="father"?"fatherId":"motherId", otherKey = opts.rel==="father"?"motherId":"fatherId";
+    const other = base[otherKey] && people.has(base[otherKey]) ? base[otherKey] : null;
+    if(other){ d.partners={...d.partners,[other]:"spouse"}; }
+    await writePerson(id,d);
+    base[key]=id; await writePerson(bid,base);
+    if(other){ const o=JSON.parse(JSON.stringify(P(other))); o.partners={...(o.partners||{}),[id]:"spouse"}; await writePerson(other,o); }
+    return;
+  }
+  if(opts.rel==="partner"){
+    d.partners={[bid]:ptype}; await writePerson(id,d);
+    base.partners={...(base.partners||{}),[id]:ptype}; await writePerson(bid,base); return;
+  }
+  if(opts.rel==="child"){
+    const op = otherParent && people.has(otherParent) ? P(otherParent) : null;
+    let baseIsFather = g(base)==="M" || (g(base)==="U" && (!op || g(op)!=="M"));
+    d[baseIsFather?"fatherId":"motherId"]=bid;
+    if(op) d[baseIsFather?"motherId":"fatherId"]=otherParent;
+    await writePerson(id,d); return;
+  }
+  if(opts.rel==="sibling"){
+    d.fatherId=base.fatherId||null; d.motherId=base.motherId||null;
+    if(!d.fatherId && !d.motherId){
+      // create an unknown shared parent so the sibling link exists
+      const pid=newId(); const par=blank(); par.firstName="Părinte necunoscut"; par.lastName=base.lastName||"";
+      await writePerson(pid,par); base.fatherId=pid; await writePerson(bid,base); d.fatherId=pid;
+    }
+    await writePerson(id,d); return;
+  }
+}
+
+async function deletePerson(id){
+  for(const [k,p] of people){ if(k===id) continue;
+    let ch=false; const c=JSON.parse(JSON.stringify(p));
+    if(c.fatherId===id){c.fatherId=null;ch=true;} if(c.motherId===id){c.motherId=null;ch=true;}
+    if(c.partners&&c.partners[id]){ delete c.partners[id]; ch=true; }
+    if(ch) await writePerson(k,c);
+  }
+  people.delete(id);
+  if(focusId===id) focusId=rootId&&rootId!==id?rootId:null;
+  if(rootId===id) rootId=null;
+  await persist();
+  closePanel(); toast("Persoana a fost ștearsă"); render();
+}
+
+function shrink(file){
+  return new Promise((res)=>{
+    const img=new Image(); const url=URL.createObjectURL(file);
+    img.onload=()=>{ const s=Math.min(1,320/Math.max(img.width,img.height)); const c=document.createElement("canvas");
+      c.width=Math.round(img.width*s); c.height=Math.round(img.height*s); c.getContext("2d").drawImage(img,0,0,c.width,c.height);
+      URL.revokeObjectURL(url); res(c.toDataURL("image/jpeg",.82)); };
+    img.onerror=()=>{ URL.revokeObjectURL(url); res(null); };
+    img.src=url;
+  });
+}
+
+// ---------- list ----------
+function renderList(){
+  const q=$("#q").value.trim().toLowerCase();
+  const norm=s=>String(s||"").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g,"");
+  const nq=norm(q);
+  const arr=[...people.entries()].filter(([,p])=>!nq||norm([p.firstName,p.lastName,p.maidenName,p.birthPlace,p.deathPlace].join(" ")).includes(nq))
+    .sort((a,b)=>(a[1].lastName||"").localeCompare(b[1].lastName||"","ro")||(a[1].firstName||"").localeCompare(b[1].firstName||"","ro"));
+  $("#plist").innerHTML = arr.length ? arr.map(([k,p])=>`<button type="button" class="pitem ${g(p)}" data-go="${esc(k)}"><span class="dot">${photo(p)||esc(initials(p))}</span><span class="t"><b>${esc(fullName(p))}${p.maidenName?` <small>(n. ${esc(p.maidenName)})</small>`:""}</b><small>${esc([years(p),p.birthPlace].filter(Boolean).join(" · "))||"&nbsp;"}</small></span></button>`).join("")
+    : `<div class="muted" style="padding:14px">Nicio persoană găsită.</div>`;
+  const all=[...people.values()];
+  const missing=all.filter(p=>!p.birthDate).length;
+  $("#stats").innerHTML=`<span>${all.length} persoane</span><span>${all.filter(p=>p.status==="deceased").length} decedate</span><span>${missing} fără dată de naștere</span>`;
+}
+
+// ---------- GEDCOM ----------
+const MON=["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
+function gedDate(s){
+  s=String(s||"").trim(); if(!s) return "";
+  let m=s.match(/^(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{4})$/); if(m) return `${+m[1]} ${MON[+m[2]-1]||""} ${m[3]}`.replace(/\s+/g," ");
+  m=s.match(/^(\d{1,2})[.\/-](\d{4})$/); if(m) return `${MON[+m[1]-1]} ${m[2]}`;
+  s=s.toUpperCase().replace(/\bIAN\b/,"JAN").replace(/\bMAI\b/,"MAY").replace(/\bIUN\b/,"JUN").replace(/\bIUL\b/,"JUL").replace(/\bNOI\b/,"NOV");
+  return s.replace(/^CA\.?\s+|^CIRCA\s+|^~\s*/,"ABT ").replace(/^ÎNAINTE DE\s+/,"BEF ").replace(/^DUPĂ\s+/,"AFT ");
+}
+function buildGedcom(){
+  const ids=[...people.keys()].sort((a,b)=>(b===rootId)-(a===rootId)), I=new Map(ids.map((k,i)=>[k,"@I"+(i+1)+"@"]));
+  const fams=new Map(); // key -> {h,w,kids:[],type}
+  const famKey=(a,b)=>[a||"",b||""].join("|");
+  for(const [k,p] of people){
+    if(p.fatherId||p.motherId){ const fk=famKey(p.fatherId,p.motherId); if(!fams.has(fk)) fams.set(fk,{h:p.fatherId,w:p.motherId,kids:[],type:null}); fams.get(fk).kids.push(k); }
+  }
+  for(const [k,p] of people){ for(const [o,t] of Object.entries(p.partners||{})){ if(!people.has(o)) continue;
+    const q=P(o); let h=k,w=o; if(g(p)==="F"||g(q)==="M"){h=o;w=k;}
+    const fk=famKey(h,w), rk=famKey(w,h);
+    const f=fams.get(fk)||fams.get(rk); if(f){ f.type=f.type||t; } else fams.set(fk,{h,w,kids:[],type:t}); } }
+  const F=new Map([...fams.keys()].map((k,i)=>[k,"@F"+(i+1)+"@"]));
+  const line=(lvl,tag,val)=>{ if(val===undefined) return `${lvl} ${tag}`; const v=String(val).replace(/\r?\n/g," "); return `${lvl} ${tag} ${v}`; };
+  const out=["0 HEAD","1 SOUR ArboreleFamiliei","2 NAME Arborele familiei","1 DATE "+gedToday(),"1 GEDC","2 VERS 5.5.1","2 FORM LINEAGE-LINKED","1 CHAR UTF-8","1 LANG Romanian"];
+  for(const k of ids){ const p=P(k);
+    out.push(`0 ${I.get(k)} INDI`);
+    const birthSurname = g(p)==="F" && p.maidenName ? p.maidenName : p.lastName;
+    out.push(line(1,"NAME",`${p.firstName||""} /${birthSurname||""}/`.trim()));
+    if(p.firstName) out.push(line(2,"GIVN",p.firstName)); if(birthSurname) out.push(line(2,"SURN",birthSurname));
+    if(g(p)==="F" && p.maidenName && p.lastName && p.lastName!==p.maidenName){ out.push(line(1,"NAME",`${p.firstName||""} /${p.lastName}/`)); out.push(line(2,"TYPE","married")); }
+    out.push(line(1,"SEX",g(p)));
+    if(p.birthDate||p.birthPlace){ out.push("1 BIRT"); if(p.birthDate) out.push(line(2,"DATE",gedDate(p.birthDate))); if(p.birthPlace) out.push(line(2,"PLAC",p.birthPlace)); }
+    if(p.status==="deceased"){ out.push(p.deathDate||p.deathPlace?"1 DEAT":"1 DEAT Y"); if(p.deathDate) out.push(line(2,"DATE",gedDate(p.deathDate))); if(p.deathPlace) out.push(line(2,"PLAC",p.deathPlace));
+      if(p.burialPlace){ out.push("1 BURI"); out.push(line(2,"PLAC",p.burialPlace)); } }
+    if(p.about){ const parts=p.about.split(/\r?\n/); out.push(line(1,"NOTE",parts[0])); parts.slice(1).forEach(x=>out.push(line(2,"CONT",x))); }
+    for(const [fk,f] of fams){ if(f.kids.includes(k)) out.push(line(1,"FAMC",F.get(fk))); if(f.h===k||f.w===k) out.push(line(1,"FAMS",F.get(fk))); }
+  }
+  for(const [fk,f] of fams){
+    out.push(`0 ${F.get(fk)} FAM`);
+    if(f.h) out.push(line(1,"HUSB",I.get(f.h))); if(f.w) out.push(line(1,"WIFE",I.get(f.w)));
+    if(f.type==="spouse") out.push("1 MARR Y"); else if(f.type==="partner") out.push("1 _PARTNER Y");
+    f.kids.forEach(c=>out.push(line(1,"CHIL",I.get(c))));
+  }
+  out.push("0 TRLR");
+  return out.join("\r\n")+"\r\n";
+}
+function gedToday(){ const d=new Date(); return `${d.getDate()} ${MON[d.getMonth()]} ${d.getFullYear()}`; }
+async function save(filename,data,type){
+  const file=new File([data],filename,{type:type||"text/plain"});
+  const mobile=/iPhone|iPad|Android/i.test(navigator.userAgent);
+  if(mobile && navigator.canShare && navigator.canShare({files:[file]})){
+    try{ await navigator.share({files:[file],title:filename}); return; }catch(e){ if(e.name==="AbortError") return; }
+  }
+  const a=document.createElement("a"); a.href=URL.createObjectURL(file); a.download=filename; document.body.appendChild(a); a.click();
+  setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); },1500); toast("Fișierul a fost descărcat");
+}
+
+// ---------- import ----------
+function parseGedcom(text){
+  const recs=[]; let cur=null;
+  for(const raw of text.replace(/^﻿/,"").split(/\r?\n/)){
+    const m=raw.trim().match(/^(\d+)\s+(\S+)(?:\s(.*))?$/); if(!m) continue;
+    const lv=+m[1], tag=m[2], val=(m[3]||"").trim();
+    if(lv===0){ cur={xref:tag, type:val, lines:[]}; recs.push(cur); } else if(cur) cur.lines.push([lv,tag,val]);
+  }
+  const map=new Map(), out=new Map(); let first=null;
+  const nice=d=>String(d||"").replace(/\b([A-Z]{3})\b/g,w=>w[0]+w.slice(1).toLowerCase());
+  for(const r of recs.filter(r=>r.type==="INDI")){
+    const id=newId(); map.set(r.xref,id); if(!first) first=id;
+    const d=blank(); let ctx=null, nameIdx=0, nameType="", given="", sur="", marn="", marriedSur="", nameRaw="", noteBuf=[];
+    for(const [lv,t,v] of r.lines){
+      if(lv===1){ ctx=t; if(t==="NAME"){ nameIdx++; nameType=""; if(nameIdx===1) nameRaw=v; else { const mm=v.match(/\/(.*)\//); if(mm) marriedSur=mm[1].trim(); } } }
+      if(lv===2 && t==="TYPE" && ctx==="NAME" && nameIdx>1 && !/married/i.test(v)) marriedSur="";
+      if(lv===2 && ctx==="NAME" && nameIdx===1){ if(t==="GIVN") given=v; if(t==="SURN") sur=v; if(t==="_MARNM") marn=v; }
+      if(lv===1 && t==="SEX") d.gender = v==="M"||v==="F" ? v : "U";
+      if(lv===2 && t==="DATE" && ctx==="BIRT") d.birthDate=nice(v);
+      if(lv===2 && t==="PLAC" && ctx==="BIRT") d.birthPlace=v;
+      if(lv===1 && t==="DEAT") d.status="deceased";
+      if(lv===2 && t==="DATE" && ctx==="DEAT") d.deathDate=nice(v);
+      if(lv===2 && t==="PLAC" && ctx==="DEAT") d.deathPlace=v;
+      if(lv===2 && t==="PLAC" && ctx==="BURI") d.burialPlace=v;
+      if(lv===1 && t==="NOTE" && v && !v.startsWith("@")) noteBuf.push(v);
+      if(lv===2 && ctx==="NOTE" && (t==="CONT"||t==="CONC")) { if(t==="CONT") noteBuf.push(v); else noteBuf[noteBuf.length-1]=(noteBuf[noteBuf.length-1]||"")+v; }
+    }
+    if(!given && !sur && nameRaw){ const mm=nameRaw.match(/^([^/]*)\/([^/]*)\//); if(mm){ given=mm[1].trim(); sur=mm[2].trim(); } else given=nameRaw; }
+    d.firstName=given.trim(); d.lastName=sur.trim(); d.about=noteBuf.join("\n");
+    const married = marn || marriedSur;
+    if(d.gender==="F" && married && married!==d.lastName){ d.maidenName=d.lastName; d.lastName=married; }
+    out.set(id,d);
+  }
+  for(const r of recs.filter(r=>r.type==="FAM")){
+    let h=null,w=null,kids=[],type="spouse";
+    for(const [lv,t,v] of r.lines){ if(lv!==1) continue;
+      if(t==="HUSB") h=map.get(v)||null; if(t==="WIFE") w=map.get(v)||null; if(t==="CHIL"&&map.get(v)) kids.push(map.get(v)); if(t==="_PARTNER") type="partner"; }
+    const pars=[h,w].filter(Boolean);
+    const fa=pars.find(x=>out.get(x).gender==="M") || (pars.length===2 && out.get(pars[1]).gender==="F" ? pars[0] : (pars.length===1 && out.get(pars[0]).gender!=="F" ? pars[0] : null));
+    const mo=pars.find(x=>x!==fa) || null;
+    for(const c of kids){ const cd=out.get(c); cd.fatherId=fa; cd.motherId=mo; }
+    if(h&&w){ out.get(h).partners[w]=type; out.get(w).partners[h]=type; }
+  }
+  return {people:out, rootId:first};
+}
+let pendingImport=null;
+async function handleImportFile(file){
+  const text=await file.text();
+  let data;
+  try{
+    if(text.trim().startsWith("{")){ const j=JSON.parse(text); data={people:new Map(Object.entries(j.people||{}).map(([k,v])=>[k,{...blank(),...v}])), rootId:j.rootId||null}; }
+    else { if(!/^﻿?\s*0\s+HEAD/.test(text)) throw new Error("format"); data=parseGedcom(text); }
+  }catch(e){ toast("Fișierul nu pare un arbore GEDCOM sau o copie de siguranță"); return; }
+  if(!data.people.size){ toast("Fișierul nu conține nicio persoană"); return; }
+  pendingImport=data;
+  if(!people.size) return applyImport();
+  $("#impInfo").textContent=`Fișierul are ${data.people.size} persoane. Arborele actual de pe acest dispozitiv (${people.size} persoane) va fi înlocuit. Dacă ai modificări aici, exportă-le întâi.`;
+  $("#confirmImp").hidden=false;
+}
+async function applyImport(){
+  const data=pendingImport; pendingImport=null; $("#confirmImp").hidden=true; if(!data) return;
+  people=data.people; rootId=data.rootId && people.has(data.rootId) ? data.rootId : people.keys().next().value; focusId=rootId;
+  await persist(); closePanel(); render(); requestAnimationFrame(()=>centerOnFocus(false));
+  toast(`Am importat ${people.size} persoane`);
+}
+
+// ---------- events ----------
+document.addEventListener("click", e=>{
+  const go=e.target.closest("[data-go]"); if(go){ focusId=go.dataset.go; $("#listSheet").hidden=true; render(); showPerson(focusId); requestAnimationFrame(()=>centerOnFocus(true)); return; }
+  const card=e.target.closest(".card[data-id]"); if(card){ focusId=card.dataset.id; render(); showPerson(focusId); requestAnimationFrame(()=>centerOnFocus(true)); return; }
+  const add=e.target.closest("[data-add]"); if(add){ openForm({mode:"new", rel:add.dataset.add, base:add.dataset.base}); return; }
+  if(!e.target.closest("#exportMenu") && !e.target.closest("#btnExport")) $("#exportMenu").hidden=true;
+});
+$("#pClose").onclick=closePanel;
+$("#btnList").onclick=()=>{ $("#listSheet").hidden=false; $("#q").value=""; renderList(); setTimeout(()=>{ if(window.innerWidth>760) $("#q").focus(); },30); };
+$("#listClose").onclick=()=>$("#listSheet").hidden=true;
+$("#listSheet").addEventListener("click",e=>{ if(e.target.id==="listSheet") $("#listSheet").hidden=true; });
+$("#q").oninput=renderList;
+$("#btnMe").onclick=()=>{ if(rootId&&people.has(rootId)){ focusId=rootId; render(); requestAnimationFrame(()=>centerOnFocus(true)); } };
+$("#btnExport").onclick=()=>{ $("#exportMenu").hidden=!$("#exportMenu").hidden; };
+$("#exGed").onclick=()=>{ $("#exportMenu").hidden=true; if(!people.size) return toast("Arborele e gol"); save("arbore-genealogic.ged", buildGedcom()); };
+$("#exJson").onclick=()=>{ $("#exportMenu").hidden=true; save("arbore-genealogic-backup.json", JSON.stringify({rootId, people:Object.fromEntries(people)},null,2), "application/json"); };
+const zoomTo=s=>{ scale=Math.min(1.6,Math.max(.4,s)); render(); requestAnimationFrame(()=>centerOnFocus(false)); };
+$("#zIn").onclick=()=>zoomTo(scale+.15); $("#zOut").onclick=()=>zoomTo(scale-.15);
+$("#zFit").onclick=()=>{ const vp=$("#viewport"), st=$("#stage"); const w=parseFloat(st.style.width)||1, h=parseFloat(st.style.height)||1;
+  zoomTo(Math.min(1, vp.clientWidth/w, vp.clientHeight/h)); };
+document.addEventListener("keydown",e=>{ if(e.key==="Escape"){ if(!$("#listSheet").hidden) $("#listSheet").hidden=true; else if(!$("#exportMenu").hidden) $("#exportMenu").hidden=true; else closePanel(); } });
+let rT; window.addEventListener("resize",()=>{ clearTimeout(rT); rT=setTimeout(()=>{ render(); centerOnFocus(false); },120); });
+// initial scale on phones
+if(window.innerWidth<=760) scale=.8;
+
+$("#imBtn").onclick=()=>{ $("#exportMenu").hidden=true; $("#imFile").click(); };
+$("#imFile").onchange=e=>{ const f=e.target.files[0]; e.target.value=""; if(f) handleImportFile(f); };
+$("#impYes").onclick=applyImport; $("#impNo").onclick=()=>{ pendingImport=null; $("#confirmImp").hidden=true; };
+// install prompt (Android / desktop Chrome)
+let installEvt=null;
+window.addEventListener("beforeinstallprompt",e=>{ e.preventDefault(); installEvt=e; $("#inBtn").hidden=false; });
+$("#inBtn").onclick=async()=>{ $("#exportMenu").hidden=true; if(!installEvt) return; installEvt.prompt(); await installEvt.userChoice; installEvt=null; $("#inBtn").hidden=true; };
+window.addEventListener("appinstalled",()=>toast("Aplicația a fost instalată"));
+
+// ---------- boot ----------
+(async()=>{
+  if("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(()=>{});
+  try{ await IDB.open(); }catch(e){ showStatus("Nu pot deschide memoria dispozitivului","Browserul a blocat stocarea locală (poate o fereastră privată). Deschide aplicația într-o fereastră normală."); return; }
+  try{ if(navigator.storage && navigator.storage.persist) navigator.storage.persist(); }catch(e){}
+  const st=await IDB.get("state").catch(()=>null);
+  if(st && st.people){ people=new Map(Object.entries(st.people).map(([k,v])=>[k,{...blank(),...v}])); rootId=st.rootId||null; }
+  loaded=true; render();
+  requestAnimationFrame(()=>centerOnFocus(false));
+})();
+})();
+</script>
+</body>
+</html>
