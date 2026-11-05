@@ -165,6 +165,12 @@ legend{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--
 .empty h2{font-family:var(--display);font-weight:400;font-size:36px;margin:0;line-height:1.05}
 .empty p{margin:0;color:var(--muted)}
 #toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:9px 16px;border-radius:999px;font-size:14px;font-weight:500;z-index:20;box-shadow:var(--shadow);max-width:calc(100% - 32px)}
+.login{display:flex;flex-direction:column;gap:10px;width:min(320px,100%);margin-top:6px}
+.login .btn{justify-content:center}
+.login input{border:1px solid var(--line);background:var(--surface);border-radius:10px;padding:10px 12px;font-size:15px;width:100%}
+.login input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.login .actions{justify-content:center}
+.login .or{font-size:12.5px;color:var(--muted)}
 .note{font-size:12.5px;color:var(--muted);background:var(--surface-2);border:1px solid var(--line);border-radius:10px;padding:8px 10px}
 @media (max-width:760px){
   main{grid-template-columns:1fr}
@@ -203,14 +209,19 @@ legend{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--
       <button type="button" id="exGed"><b>GEDCOM pentru MyHeritage / Ancestry</b><small>Fișier .ged, gata de import</small></button>
       <button type="button" id="exJson"><b>Copie de siguranță (JSON)</b><small>Toate datele, inclusiv fotografiile</small></button>
       <button type="button" id="imBtn"><b>Importă un arbore</b><small>Fișier .ged (MyHeritage, Ancestry) sau copie .json</small></button>
+      <button type="button" id="outBtn" hidden><b>Deconectare</b><small id="who"></small></button>
       <button type="button" id="inBtn" hidden><b>Instalează aplicația</b><small>O adaugi pe ecranul principal</small></button>
     </div>
   </main>
 </div>
 <div id="toast" hidden></div>
 <input type="file" id="imFile" accept=".ged,.json,.txt,text/plain,application/json" hidden>
-<div class="menu" id="confirmImp" hidden style="top:auto;bottom:24px;left:50%;right:auto;transform:translateX(-50%)"><div style="padding:10px 12px"><b>Înlocuiesc arborele de pe acest dispozitiv?</b><p class="muted" style="margin:6px 0 10px;font-size:13px" id="impInfo"></p><div class="actions"><button class="btn" type="button" id="impNo" style="display:inline-flex;width:auto">Renunță</button><button class="btn primary" type="button" id="impYes" style="display:inline-flex;width:auto">Înlocuiește</button></div></div></div>
+<div class="menu" id="confirmImp" hidden style="top:auto;bottom:24px;left:50%;right:auto;transform:translateX(-50%)"><div style="padding:10px 12px"><b>Înlocuiesc arborele din cont?</b><p class="muted" style="margin:6px 0 10px;font-size:13px" id="impInfo"></p><div class="actions"><button class="btn" type="button" id="impNo" style="display:inline-flex;width:auto">Renunță</button><button class="btn primary" type="button" id="impYes" style="display:inline-flex;width:auto">Înlocuiește</button></div></div></div>
 
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="firebase-config.js"></script>
 <script>
 (() => {
 const $ = s => document.querySelector(s);
@@ -246,11 +257,58 @@ const IDB={db:null,
   open(){ return new Promise((res,rej)=>{ const r=indexedDB.open("arbore",1); r.onupgradeneeded=()=>r.result.createObjectStore("kv"); r.onsuccess=()=>{IDB.db=r.result;res();}; r.onerror=()=>rej(r.error); }); },
   get(k){ return new Promise((res,rej)=>{ const t=IDB.db.transaction("kv").objectStore("kv").get(k); t.onsuccess=()=>res(t.result); t.onerror=()=>rej(t.error); }); },
   set(k,v){ return new Promise((res,rej)=>{ const tx=IDB.db.transaction("kv","readwrite"); tx.objectStore("kv").put(v,k); tx.oncomplete=()=>res(); tx.onerror=()=>rej(tx.error); }); } };
-let saveChain=Promise.resolve();
-function persist(){ const snap={rootId, people:Object.fromEntries(people), savedAt:new Date().toISOString()};
-  saveChain=saveChain.then(()=>IDB.set("state",snap)).catch(e=>{ toast("Nu am putut salva pe dispozitiv"); throw e; }); return saveChain; }
-async function writePerson(id, data){ people.set(id, data); await persist(); }
-async function setRoot(id){ rootId=id; await persist(); render(); }
+// ---------- cloud sync (Firebase) ----------
+let fdb=null, auth=null, uid=null, unsubs=[], centered=false;
+const col=()=>fdb.collection("users").doc(uid).collection("people");
+const metaRef=()=>fdb.collection("users").doc(uid).collection("meta").doc("settings");
+const clean=d=>JSON.parse(JSON.stringify(d));
+function writeErr(e){ console.error(e); toast("Nu am putut salva: "+(e && (e.code||e.message))); }
+// writes go to the local cache immediately and sync when online, so they are not awaited
+async function writePerson(id, data){ people.set(id, data); col().doc(id).set(clean(data)).catch(writeErr); }
+async function setRoot(id){ rootId=id; render(); metaRef().set({rootId:id}).catch(writeErr); }
+function removePerson(id){ col().doc(id).delete().catch(writeErr); }
+function replaceAll(newPeople, newRoot){
+  const ops=[]; for(const k of people.keys()) if(!newPeople.has(k)) ops.push(["del",k]); for(const [k,v] of newPeople) ops.push(["set",k,v]);
+  for(let i=0;i<ops.length;i+=400){ const b=fdb.batch(); for(const o of ops.slice(i,i+400)){ const r=col().doc(o[1]); if(o[0]==="del") b.delete(r); else b.set(r,clean(o[2])); } b.commit().catch(writeErr); }
+  metaRef().set({rootId:newRoot||null}).catch(writeErr);
+}
+function subscribe(){
+  let migrated=false;
+  const timer=setTimeout(()=>{ if(!loaded) showStatus("Datele nu răspund încă","Verifică internetul. Arborele apare imediat ce datele ajung."); },10000);
+  unsubs.push(col().onSnapshot(snap=>{
+    people=new Map(snap.docs.map(d=>[d.id,{...blank(),...d.data()}]));
+    if(!snap.metadata.fromCache || snap.size){ loaded=true; clearTimeout(timer); }
+    if(!snap.metadata.fromCache && !snap.size && !migrated){ migrated=true; migrateLocal(); }
+    render(); if(!centered && people.size){ centered=true; requestAnimationFrame(()=>centerOnFocus(false)); }
+  }, e=>{ clearTimeout(timer); showStatus("Nu pot încărca arborele","Eroare: "+e.code+". Încearcă din nou mai târziu."); }));
+  unsubs.push(metaRef().onSnapshot(s=>{ rootId = s.exists ? s.data().rootId : null; if(uid) render(); }, ()=>{}));
+}
+async function migrateLocal(){
+  try{ await IDB.open(); const st=await IDB.get("state");
+    if(st && st.people && Object.keys(st.people).length){
+      const m=new Map(Object.entries(st.people).map(([k,v])=>[k,{...blank(),...v}]));
+      replaceAll(m, st.rootId || m.keys().next().value); toast(`Am urcat în cont cele ${m.size} persoane de pe acest dispozitiv`);
+    } }catch(e){}
+}
+const AUTH_ERR={"auth/invalid-credential":"Email sau parolă greșite.","auth/wrong-password":"Email sau parolă greșite.","auth/user-not-found":"Nu există cont cu acest email. Apasă „Creează cont”.","auth/email-already-in-use":"Există deja un cont cu acest email. Apasă „Intră”.","auth/weak-password":"Parola trebuie să aibă cel puțin 6 caractere.","auth/invalid-email":"Adresa de email nu e validă.","auth/unauthorized-domain":"Adresa aplicației nu e autorizată în Firebase.","auth/network-request-failed":"Nu există conexiune la internet.","auth/too-many-requests":"Prea multe încercări. Mai încearcă peste câteva minute."};
+function showAuthError(e){ if(!e || e.code==="auth/popup-closed-by-user" || e.code==="auth/cancelled-popup-request") return; const el=$("#lgErr"); const msg=AUTH_ERR[e.code]||("Nu am putut intra ("+(e.code||e.message)+")."); if(el){ el.textContent=msg; el.hidden=false; } else toast(msg); }
+function showLogin(){
+  $("#cards").innerHTML=""; $("#lines").innerHTML=""; closePanel(); $("#countLbl").textContent="";
+  showStatus("Arborele familiei","Conectează-te ca să vezi același arbore pe laptop și pe telefon. Modificările se sincronizează automat.",
+  `<form class="login" id="lgForm" novalidate>
+     <button class="btn primary" id="gBtn" type="button">Continuă cu Google</button>
+     <div class="or">sau cu email și parolă</div>
+     <input id="lgEmail" type="email" placeholder="Email" autocomplete="username" required>
+     <input id="lgPass" type="password" placeholder="Parolă (minim 6 caractere)" autocomplete="current-password" required>
+     <div class="actions"><button class="btn" id="lgIn" type="submit">Intră</button><button class="btn" id="lgUp" type="button">Creează cont</button></div>
+     <div class="err" id="lgErr" hidden></div>
+   </form>`);
+  $("#gBtn").onclick=async()=>{ const prov=new firebase.auth.GoogleAuthProvider(); prov.setCustomParameters({prompt:"select_account"});
+    try{ await auth.signInWithPopup(prov); }catch(e){ if(["auth/popup-blocked","auth/operation-not-supported-in-this-environment"].includes(e.code)){ try{ await auth.signInWithRedirect(prov); }catch(e2){ showAuthError(e2); } } else showAuthError(e); } };
+  const creds=()=>[$("#lgEmail").value.trim(), $("#lgPass").value];
+  $("#lgForm").onsubmit=async e=>{ e.preventDefault(); const [em,pw]=creds(); try{ await auth.signInWithEmailAndPassword(em,pw); }catch(err){ showAuthError(err); } };
+  $("#lgUp").onclick=async()=>{ const [em,pw]=creds(); try{ await auth.createUserWithEmailAndPassword(em,pw); }catch(err){ showAuthError(err); } };
+}
 
 function showStatus(title, text, btn){
   const s=$("#status"); s.hidden=false;
@@ -325,6 +383,7 @@ function layout(fid){
 }
 
 function render(){
+  if(!uid) return;
   $("#countLbl").textContent = people.size ? people.size + (people.size===1?" persoană":" persoane") : "";
   if(!people.size){
     $("#cards").innerHTML=""; $("#lines").innerHTML="";
@@ -560,10 +619,9 @@ async function deletePerson(id){
     if(c.partners&&c.partners[id]){ delete c.partners[id]; ch=true; }
     if(ch) await writePerson(k,c);
   }
-  people.delete(id);
+  people.delete(id); removePerson(id);
   if(focusId===id) focusId=rootId&&rootId!==id?rootId:null;
-  if(rootId===id) rootId=null;
-  await persist();
+  if(rootId===id){ rootId=null; metaRef().set({rootId:null}).catch(writeErr); }
   closePanel(); toast("Persoana a fost ștearsă"); render();
 }
 
@@ -704,13 +762,13 @@ async function handleImportFile(file){
   if(!data.people.size){ toast("Fișierul nu conține nicio persoană"); return; }
   pendingImport=data;
   if(!people.size) return applyImport();
-  $("#impInfo").textContent=`Fișierul are ${data.people.size} persoane. Arborele actual de pe acest dispozitiv (${people.size} persoane) va fi înlocuit. Dacă ai modificări aici, exportă-le întâi.`;
+  $("#impInfo").textContent=`Fișierul are ${data.people.size} persoane. Arborele actual din cont (${people.size} persoane) va fi înlocuit pe toate dispozitivele. Dacă vrei să-l păstrezi, exportă-l întâi.`;
   $("#confirmImp").hidden=false;
 }
 async function applyImport(){
   const data=pendingImport; pendingImport=null; $("#confirmImp").hidden=true; if(!data) return;
-  people=data.people; rootId=data.rootId && people.has(data.rootId) ? data.rootId : people.keys().next().value; focusId=rootId;
-  await persist(); closePanel(); render(); requestAnimationFrame(()=>centerOnFocus(false));
+  const r = data.rootId && data.people.has(data.rootId) ? data.rootId : data.people.keys().next().value;
+  replaceAll(data.people, r); people=data.people; rootId=r; focusId=r; closePanel(); render(); requestAnimationFrame(()=>centerOnFocus(false));
   toast(`Am importat ${people.size} persoane`);
 }
 
@@ -749,14 +807,23 @@ $("#inBtn").onclick=async()=>{ $("#exportMenu").hidden=true; if(!installEvt) ret
 window.addEventListener("appinstalled",()=>toast("Aplicația a fost instalată"));
 
 // ---------- boot ----------
+$("#outBtn").onclick=async()=>{ $("#exportMenu").hidden=true; await auth.signOut(); toast("Te-ai deconectat"); };
 (async()=>{
   if("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(()=>{});
-  try{ await IDB.open(); }catch(e){ showStatus("Nu pot deschide memoria dispozitivului","Browserul a blocat stocarea locală (poate o fereastră privată). Deschide aplicația într-o fereastră normală."); return; }
+  if(!window.firebase || !window.FIREBASE_CONFIG || !window.FIREBASE_CONFIG.apiKey){ showStatus("Aplicația nu se poate conecta","Lipsește configurarea Firebase sau nu există internet la prima deschidere."); return; }
+  firebase.initializeApp(window.FIREBASE_CONFIG);
+  fdb=firebase.firestore();
+  try{ await fdb.enablePersistence({synchronizeTabs:true}); }catch(e){}
   try{ if(navigator.storage && navigator.storage.persist) navigator.storage.persist(); }catch(e){}
-  const st=await IDB.get("state").catch(()=>null);
-  if(st && st.people){ people=new Map(Object.entries(st.people).map(([k,v])=>[k,{...blank(),...v}])); rootId=st.rootId||null; }
-  loaded=true; render();
-  requestAnimationFrame(()=>centerOnFocus(false));
+  auth=firebase.auth();
+  auth.getRedirectResult().catch(showAuthError);
+  auth.onAuthStateChanged(u=>{
+    unsubs.forEach(f=>f()); unsubs=[]; people=new Map(); rootId=null; focusId=null; loaded=false; centered=false;
+    if(!u){ uid=null; $("#outBtn").hidden=true; showLogin(); return; }
+    uid=u.uid; $("#outBtn").hidden=false; $("#who").textContent=u.email||"";
+    showStatus("Se încarcă arborele…","Aduc persoanele din contul tău.");
+    subscribe();
+  });
 })();
 })();
 </script>
